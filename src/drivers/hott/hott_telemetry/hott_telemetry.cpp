@@ -223,24 +223,24 @@ hott_telemetry_thread_main(int argc, char *argv[])
 int
 hott_telemetry_main(int argc, char *argv[])
 {
-	if (argc < 1) {
+	if (argc < 2) {
 		errx(1, "missing command\n%s", commandline_usage);
 	}
 
 	if (!strcmp(argv[1], "start")) {
 
 		if (thread_running) {
-			warnx("deamon already running");
+			warnx("already running");
 			exit(0);
 		}
 
 		thread_should_exit = false;
 		deamon_task = task_spawn_cmd(daemon_name,
 					 SCHED_DEFAULT,
-					 SCHED_PRIORITY_MAX - 40,
+					 SCHED_PRIORITY_DEFAULT,
 					 2048,
 					 hott_telemetry_thread_main,
-					 (argv) ? (const char **)&argv[2] : (const char **)NULL);
+					 (argv) ? (char * const *)&argv[2] : (char * const *)NULL);
 		exit(0);
 	}
 
@@ -251,10 +251,10 @@ hott_telemetry_main(int argc, char *argv[])
 
 	if (!strcmp(argv[1], "status")) {
 		if (thread_running) {
-			warnx("daemon is running");
+			warnx("is running");
 
 		} else {
-			warnx("daemon not started");
+			warnx("not started");
 		}
 
 		exit(0);

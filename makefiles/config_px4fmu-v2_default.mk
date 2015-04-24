@@ -21,42 +21,47 @@ MODULES		+= drivers/px4fmu
 MODULES		+= drivers/px4io
 MODULES		+= drivers/boards/px4fmu-v2
 MODULES		+= drivers/rgbled
+MODULES		+= drivers/mpu6000
 MODULES		+= drivers/lsm303d
 MODULES		+= drivers/l3gd20
 MODULES		+= drivers/hmc5883
 MODULES		+= drivers/ms5611
 MODULES		+= drivers/mb12xx
+MODULES		+= drivers/sf0x
+MODULES		+= drivers/ll40ls
+MODULES		+= drivers/trone
 MODULES		+= drivers/gps
 MODULES		+= drivers/hil
+MODULES		+= drivers/hott
 MODULES		+= drivers/hott/hott_telemetry
 MODULES		+= drivers/hott/hott_sensors
 MODULES		+= drivers/blinkm
 MODULES		+= drivers/airspeed
 MODULES		+= drivers/ets_airspeed
 MODULES		+= drivers/meas_airspeed
+MODULES		+= drivers/frsky_telemetry
 MODULES		+= modules/sensors
-
-# Needs to be burned to the ground and re-written; for now,
-# just don't build it.
-#MODULES		+= drivers/mkblctrl
+MODULES		+= drivers/mkblctrl
+MODULES		+= drivers/px4flow
+MODULES		+= drivers/oreoled
+MODULES		+= drivers/gimbal
 
 #
 # System commands
 #
-MODULES		+= systemcmds/ramtron
 MODULES		+= systemcmds/bl_update
-MODULES		+= systemcmds/boardinfo
 MODULES		+= systemcmds/mixer
 MODULES		+= systemcmds/param
 MODULES		+= systemcmds/perf
-MODULES		+= systemcmds/preflight_check
 MODULES		+= systemcmds/pwm
 MODULES		+= systemcmds/esc_calib
 MODULES		+= systemcmds/reboot
 MODULES		+= systemcmds/top
-MODULES		+= systemcmds/tests
 MODULES		+= systemcmds/config
 MODULES		+= systemcmds/nshterm
+MODULES		+= systemcmds/mtd
+MODULES		+= systemcmds/dumpfile
+MODULES		+= systemcmds/ver
 
 #
 # General system control
@@ -64,35 +69,31 @@ MODULES		+= systemcmds/nshterm
 MODULES		+= modules/commander
 MODULES		+= modules/navigator
 MODULES		+= modules/mavlink
-MODULES		+= modules/mavlink_onboard
+MODULES		+= modules/gpio_led
+MODULES		+= modules/uavcan
+MODULES 	+= modules/land_detector
 
 #
-# Estimation modules (EKF / other filters)
+# Estimation modules (EKF/ SO3 / other filters)
 #
 MODULES		+= modules/attitude_estimator_ekf
-MODULES		+= modules/att_pos_estimator_ekf
+MODULES		+= modules/ekf_att_pos_estimator
 MODULES		+= modules/position_estimator_inav
-MODULES		+= examples/flow_position_estimator
 
 #
 # Vehicle Control
 #
-#MODULES		+= modules/segway # XXX needs state machine update
+#MODULES		+= modules/segway # XXX Needs GCC 4.7 fix
 MODULES		+= modules/fw_pos_control_l1
 MODULES		+= modules/fw_att_control
-MODULES		+= modules/multirotor_att_control
-MODULES		+= modules/multirotor_pos_control
+MODULES		+= modules/mc_att_control
+MODULES		+= modules/mc_pos_control
+MODULES 	+= modules/vtol_att_control
 
 #
 # Logging
 #
 MODULES		+= modules/sdlog2
-
-#
-# Unit tests
-#
-#MODULES 	+= modules/unit_test
-#MODULES 	+= modules/commander/commander_tests
 
 #
 # Library modules
@@ -101,6 +102,7 @@ MODULES		+= modules/systemlib
 MODULES		+= modules/systemlib/mixer
 MODULES		+= modules/controllib
 MODULES		+= modules/uORB
+MODULES		+= modules/dataman
 
 #
 # Libraries
@@ -111,6 +113,25 @@ MODULES		+= lib/mathlib/math/filter
 MODULES		+= lib/ecl
 MODULES		+= lib/external_lgpl
 MODULES		+= lib/geo
+MODULES		+= lib/geo_lookup
+MODULES		+= lib/conversion
+MODULES		+= lib/launchdetection
+MODULES		+= platforms/nuttx
+
+#
+# OBC challenge
+#
+MODULES		+= modules/bottle_drop
+
+#
+# PX4 flow estimator, good for indoors
+#
+MODULES		+= examples/flow_position_estimator
+
+#
+# Rover apps
+#
+MODULES		+= examples/rover_steering_control
 
 #
 # Demo apps
@@ -134,6 +155,9 @@ MODULES		+= lib/geo
 
 # Hardware test
 #MODULES			+= examples/hwtest
+
+# Generate parameter XML file
+GEN_PARAM_XML = 1
 
 #
 # Transitional support - add commands from the NuttX export archive.

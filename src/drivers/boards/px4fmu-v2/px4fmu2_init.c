@@ -94,6 +94,19 @@
 #  endif
 #endif
 
+/*
+ * Ideally we'd be able to get these from up_internal.h,
+ * but since we want to be able to disable the NuttX use
+ * of leds for system indication at will and there is no
+ * separate switch, we need to build independent of the
+ * CONFIG_ARCH_LEDS configuration switch.
+ */
+__BEGIN_DECLS
+extern void led_init(void);
+extern void led_on(int led);
+extern void led_off(int led);
+__END_DECLS
+
 /****************************************************************************
  * Protected Functions
  ****************************************************************************/
@@ -192,6 +205,7 @@ stm32_boardinitialize(void)
 
 static struct spi_dev_s *spi1;
 static struct spi_dev_s *spi2;
+static struct spi_dev_s *spi4;
 static struct sdio_dev_s *sdio;
 
 #include <math.h>
@@ -215,9 +229,9 @@ __EXPORT int nsh_archinitialize(void)
 	stm32_configgpio(GPIO_ADC1_IN2);	/* BATT_VOLTAGE_SENS */
 	stm32_configgpio(GPIO_ADC1_IN3);	/* BATT_CURRENT_SENS */
 	stm32_configgpio(GPIO_ADC1_IN4);	/* VDD_5V_SENS */
-	stm32_configgpio(GPIO_ADC1_IN10);	/* unrouted */
-	stm32_configgpio(GPIO_ADC1_IN11);	/* unrouted */
-	stm32_configgpio(GPIO_ADC1_IN12);	/* unrouted */
+	// stm32_configgpio(GPIO_ADC1_IN10);	/* used by VBUS valid */
+	// stm32_configgpio(GPIO_ADC1_IN11);	/* unused */
+	// stm32_configgpio(GPIO_ADC1_IN12);	/* used by MPU6000 CS */
 	stm32_configgpio(GPIO_ADC1_IN13);	/* FMU_AUX_ADC_1 */
 	stm32_configgpio(GPIO_ADC1_IN14);	/* FMU_AUX_ADC_2 */
 	stm32_configgpio(GPIO_ADC1_IN15);	/* PRESSURE_SENS */
@@ -279,9 +293,10 @@ __EXPORT int nsh_archinitialize(void)
 	SPI_SELECT(spi1, PX4_SPIDEV_GYRO, false);
 	SPI_SELECT(spi1, PX4_SPIDEV_ACCEL_MAG, false);
 	SPI_SELECT(spi1, PX4_SPIDEV_BARO, false);
+	SPI_SELECT(spi1, PX4_SPIDEV_MPU, false);
 	up_udelay(20);
 
-	message("[boot] Successfully initialized SPI port 1\n");
+	message("[boot] Initialized SPI port 1 (SENSORS)\n");
 
 	/* Get the SPI port for the FRAM */
 
@@ -293,20 +308,34 @@ __EXPORT int nsh_archinitialize(void)
 		return -ENODEV;
 	}
 
-	/* Default SPI2 to 37.5 MHz (F4 max) and de-assert the known chip selects. */
-	SPI_SETFREQUENCY(spi2, 375000000);
+	/* Default SPI2 to 37.5 MHz (40 MHz rounded to nearest valid divider, F4 max)
+	 * and de-assert the known chip selects. */
+
+	// XXX start with 10.4 MHz in FRAM usage and go up to 37.5 once validated
+	SPI_SETFREQUENCY(spi2, 12 * 1000 * 1000);
 	SPI_SETBITS(spi2, 8);
 	SPI_SETMODE(spi2, SPIDEV_MODE3);
 	SPI_SELECT(spi2, SPIDEV_FLASH, false);
 
-	message("[boot] Successfully initialized SPI port 2\n");
+	message("[boot] Initialized SPI port 2 (RAMTRON FRAM)\n");
+
+	spi4 = up_spiinitialize(4);
+
+	/* Default SPI4 to 1MHz and de-assert the known chip selects. */
+	SPI_SETFREQUENCY(spi4, 10000000);
+	SPI_SETBITS(spi4, 8);
+	SPI_SETMODE(spi4, SPIDEV_MODE3);
+	SPI_SELECT(spi4, PX4_SPIDEV_EXT0, false);
+	SPI_SELECT(spi4, PX4_SPIDEV_EXT1, false);
+
+	message("[boot] Initialized SPI port 4\n");
 
 	#ifdef CONFIG_MMCSD
 	/* First, get an instance of the SDIO interface */
 
 	sdio = sdio_initialize(CONFIG_NSH_MMCSDSLOTNO);
 	if (!sdio) {
-		message("nsh_archinitialize: Failed to initialize SDIO slot %d\n",
+		message("[boot] Failed to initialize SDIO slot %d\n",
 			CONFIG_NSH_MMCSDSLOTNO);
 		return -ENODEV;
 	}
@@ -314,7 +343,7 @@ __EXPORT int nsh_archinitialize(void)
 	/* Now bind the SDIO interface to the MMC/SD driver */
 	int ret = mmcsd_slotinitialize(CONFIG_NSH_MMCSDMINOR, sdio);
 	if (ret != OK) {
-		message("nsh_archinitialize: Failed to bind SDIO to the MMC/SD driver: %d\n", ret);
+		message("[boot] Failed to bind SDIO to the MMC/SD driver: %d\n", ret);
 		return ret;
 	}
 

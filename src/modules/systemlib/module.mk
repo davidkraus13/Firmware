@@ -1,6 +1,6 @@
 ############################################################################
 #
-#   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+#   Copyright (c) 2012-2014 PX4 Development Team. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -49,4 +49,14 @@ SRCS		 = err.c \
 		   airspeed.c \
 		   system_params.c \
 		   mavlink_log.c \
-		   rc_check.c
+		   rc_check.c \
+		   otp.c \
+		   board_serial.c \
+		   pwm_limit/pwm_limit.c \
+		   circuit_breaker.cpp \
+		   circuit_breaker_params.c \
+		   mcu_version.c
+
+MAXOPTIMIZATION	 = -Os
+
+EXTRACFLAGS	= -Wno-sign-compare

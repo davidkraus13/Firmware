@@ -60,14 +60,14 @@
 #define DIR_WRITE			(0<<7)
 #define ADDR_INCREMENT			(1<<6)
 
-#ifdef PX4_SPIDEV_BARO
+#if defined(PX4_SPIDEV_BARO) || defined(PX4_SPIDEV_EXT_BARO)
 
-device::Device *MS5611_spi_interface(ms5611::prom_u &prom_buf);
+device::Device *MS5611_spi_interface(ms5611::prom_u &prom_buf, bool external_bus);
 
 class MS5611_SPI : public device::SPI
 {
 public:
-	MS5611_SPI(int bus, spi_dev_e device, ms5611::prom_u &prom_buf);
+	MS5611_SPI(uint8_t bus, spi_dev_e device, ms5611::prom_u &prom_buf);
 	virtual ~MS5611_SPI();
 
 	virtual int	init();
@@ -115,13 +115,22 @@ private:
 };
 
 device::Device *
-MS5611_spi_interface(ms5611::prom_u &prom_buf)
+MS5611_spi_interface(ms5611::prom_u &prom_buf, uint8_t busnum)
 {
-	return new MS5611_SPI(1 /* XXX MAGIC NUMBER */, (spi_dev_e)PX4_SPIDEV_BARO, prom_buf);
+#ifdef PX4_SPI_BUS_EXT
+	if (busnum == PX4_SPI_BUS_EXT) {
+#ifdef PX4_SPIDEV_EXT_BARO
+		return new MS5611_SPI(busnum, (spi_dev_e)PX4_SPIDEV_EXT_BARO, prom_buf);
+#else
+		return nullptr;
+#endif
+	}
+#endif
+	return new MS5611_SPI(busnum, (spi_dev_e)PX4_SPIDEV_BARO, prom_buf);
 }
 
-MS5611_SPI::MS5611_SPI(int bus, spi_dev_e device, ms5611::prom_u &prom_buf) :
-	SPI("MS5611_SPI", nullptr, bus, device, SPIDEV_MODE3, 2000000),
+MS5611_SPI::MS5611_SPI(uint8_t bus, spi_dev_e device, ms5611::prom_u &prom_buf) :
+	SPI("MS5611_SPI", nullptr, bus, device, SPIDEV_MODE3, 11*1000*1000 /* will be rounded to 10.4 MHz */),
 	_prom(prom_buf)
 {
 }
@@ -134,7 +143,6 @@ int
 MS5611_SPI::init()
 {
 	int ret;
-	irqstate_t flags;
 
 	ret = SPI::init();
 	if (ret != OK) {
@@ -167,10 +175,9 @@ MS5611_SPI::read(unsigned offset, void *data, unsigned count)
 		uint8_t	b[4];
 		uint32_t w;
 	} *cvt = (_cvt *)data;
-	uint8_t buf[4];
+	uint8_t buf[4] = { 0 | DIR_WRITE, 0, 0, 0 };
 
 	/* read the most recent measurement */
-	buf[0] = 0 | DIR_WRITE;
 	int ret = _transfer(&buf[0], &buf[0], sizeof(buf));
 
 	if (ret == OK) {
@@ -238,21 +245,31 @@ MS5611_SPI::_read_prom()
 	usleep(3000);
 
 	/* read and convert PROM words */
+        bool all_zero = true;
 	for (int i = 0; i < 8; i++) {
 		uint8_t cmd = (ADDR_PROM_SETUP + (i * 2));
 		_prom.c[i] = _reg16(cmd);
+                if (_prom.c[i] != 0)
+			all_zero = false;
+                //debug("prom[%u]=0x%x", (unsigned)i, (unsigned)_prom.c[i]);
 	}
 
 	/* calculate CRC and return success/failure accordingly */
-	return ms5611::crc4(&_prom.c[0]) ? OK : -EIO;
+	int ret = ms5611::crc4(&_prom.c[0]) ? OK : -EIO;
+        if (ret != OK) {
+		debug("crc failed");
+        }
+        if (all_zero) {
+		debug("prom all zero");
+		ret = -EIO;
+        }
+        return ret;
 }
 
 uint16_t
 MS5611_SPI::_reg16(unsigned reg)
 {
-	uint8_t cmd[3];
-
-	cmd[0] = reg | DIR_READ;
+	uint8_t cmd[3] = { (uint8_t)(reg | DIR_READ), 0, 0 };
 
 	_transfer(cmd, cmd, sizeof(cmd));
 
@@ -265,4 +282,4 @@ MS5611_SPI::_transfer(uint8_t *send, uint8_t *recv, unsigned len)
 	return transfer(send, recv, len);
 }
 
-#endif /* PX4_SPIDEV_BARO */
+#endif /* PX4_SPIDEV_BARO || PX4_SPIDEV_EXT_BARO */

@@ -46,7 +46,6 @@
 #include <drivers/drv_hrt.h>
 #include <uORB/uORB.h>
 #include <uORB/topics/actuator_outputs.h>
-#include <uORB/topics/actuator_controls_effective.h>
 #include <systemlib/err.h>
 
 #include "ardrone_motor_control.h"
@@ -302,7 +301,7 @@ int ar_init_motors(int ardrone_uart, int gpios)
 	ardrone_write_motor_commands(ardrone_uart, 0, 0, 0, 0);
 
 	if (errcounter != 0) {
-		fprintf(stderr, "[ardrone_interface] init sequence incomplete, failed %d times", -errcounter);
+		warnx("Failed %d times", -errcounter);
 		fflush(stdout);
 	}
 	return errcounter;
@@ -340,7 +339,8 @@ int ardrone_write_motor_commands(int ardrone_fd, uint16_t motor1, uint16_t motor
 	outputs.output[3] = motor4;
 	static orb_advert_t pub = 0;
 	if (pub == 0) {
-		pub = orb_advertise(ORB_ID_VEHICLE_CONTROLS, &outputs);
+		/* advertise to channel 0 / primary */
+		pub = orb_advertise(ORB_ID(actuator_outputs), &outputs);
 	}
 
 	if (hrt_absolute_time() - last_motor_time > min_motor_interval) {
@@ -351,7 +351,7 @@ int ardrone_write_motor_commands(int ardrone_fd, uint16_t motor1, uint16_t motor
 		fsync(ardrone_fd);
 
 		/* publish just written values */
-		orb_publish(ORB_ID_VEHICLE_CONTROLS, pub, &outputs);
+		orb_publish(ORB_ID(actuator_outputs), pub, &outputs);
 
 		if (ret == sizeof(buf)) {
 			return OK;
@@ -382,11 +382,6 @@ void ardrone_mixing_and_output(int ardrone_write, const struct actuator_controls
 
 	float output_band = 0.0f;
 	const float startpoint_full_control = 0.25f;	/**< start full control at 25% thrust */
-
-	static bool initialized = false;
-	/* publish effective outputs */
-	static struct actuator_controls_effective_s actuator_controls_effective;
-	static orb_advert_t actuator_controls_effective_pub;
 
 	/* linearly scale the control inputs from 0 to startpoint_full_control */
 	if (motor_thrust < startpoint_full_control) {
@@ -428,25 +423,6 @@ void ardrone_mixing_and_output(int ardrone_write, const struct actuator_controls
 		motor_calc[2] = motor_thrust + (-roll_control / 2 - pitch_control / 2 - yaw_control);
 		// LEFT (MOTOR 4)
 		motor_calc[3] = motor_thrust + (roll_control / 2 - pitch_control / 2 + yaw_control);
-	}
-
-
-
-	/* publish effective outputs */
-	actuator_controls_effective.control_effective[0] = roll_control;
-	actuator_controls_effective.control_effective[1] = pitch_control;
-	/* yaw output after limiting */
-	actuator_controls_effective.control_effective[2] = yaw_control;
-	/* possible motor thrust limiting */
-	actuator_controls_effective.control_effective[3] = (motor_calc[0] + motor_calc[1] + motor_calc[2] + motor_calc[3]) / 4.0f;
-
-	if (!initialized) {
-		/* advertise and publish */
-		actuator_controls_effective_pub = orb_advertise(ORB_ID_VEHICLE_ATTITUDE_CONTROLS_EFFECTIVE, &actuator_controls_effective);
-		initialized = true;
-	} else {
-		/* already initialized, just publishing */
-		orb_publish(ORB_ID_VEHICLE_ATTITUDE_CONTROLS_EFFECTIVE, actuator_controls_effective_pub, &actuator_controls_effective);
 	}
 
 	/* set the motor values */

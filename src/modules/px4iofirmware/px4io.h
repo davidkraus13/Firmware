@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2012-2014 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,12 +46,17 @@
 
 #include "protocol.h"
 
+#include <systemlib/pwm_limit/pwm_limit.h>
+
 /*
  * Constants and limits.
  */
-#define PX4IO_SERVO_COUNT		8
+#define PX4IO_SERVO_COUNT		16
+#define PX4IO_SERVO_HARDWARE_COUNT	8
 #define PX4IO_CONTROL_CHANNELS		8
-#define PX4IO_INPUT_CHANNELS		8 // XXX this should be 18 channels
+#define PX4IO_CONTROL_GROUPS		4
+#define PX4IO_RC_INPUT_CHANNELS		18
+#define PX4IO_RC_MAPPED_CONTROL_CHANNELS		8 /**< This is the maximum number of channels mapped/used */
 
 /*
  * Debug logging
@@ -80,7 +85,7 @@ extern uint16_t			r_page_rc_input_config[]; /* PX4IO_PAGE_RC_INPUT_CONFIG */
 extern uint16_t			r_page_servo_failsafe[]; /* PX4IO_PAGE_FAILSAFE_PWM */
 extern uint16_t			r_page_servo_control_min[]; /* PX4IO_PAGE_CONTROL_MIN_PWM */
 extern uint16_t			r_page_servo_control_max[]; /* PX4IO_PAGE_CONTROL_MAX_PWM */
-extern uint16_t			r_page_servo_idle[];	/* PX4IO_PAGE_IDLE_PWM */
+extern uint16_t			r_page_servo_disarmed[];	/* PX4IO_PAGE_DISARMED_PWM */
 
 /*
  * Register aliases.
@@ -92,8 +97,10 @@ extern uint16_t			r_page_servo_idle[];	/* PX4IO_PAGE_IDLE_PWM */
 
 #define r_raw_rc_count		r_page_raw_rc_input[PX4IO_P_RAW_RC_COUNT]
 #define r_raw_rc_values		(&r_page_raw_rc_input[PX4IO_P_RAW_RC_BASE])
-#define r_rc_valid		r_page_rc_input[PX4IO_P_RC_VALID]
-#define r_rc_values		(&r_page_rc_input[PX4IO_P_RAW_RC_BASE])
+#define r_raw_rc_flags		r_page_raw_rc_input[PX4IO_P_RAW_RC_FLAGS]
+#define r_rc_valid			r_page_rc_input[PX4IO_P_RC_VALID]
+#define r_rc_values			(&r_page_rc_input[PX4IO_P_RC_BASE])
+#define r_mixer_limits 		r_page_status[PX4IO_P_STATUS_MIXER]
 
 #define r_setup_features	r_page_setup[PX4IO_P_SETUP_FEATURES]
 #define r_setup_arming		r_page_setup[PX4IO_P_SETUP_ARMING]
@@ -103,6 +110,7 @@ extern uint16_t			r_page_servo_idle[];	/* PX4IO_PAGE_IDLE_PWM */
 #ifdef CONFIG_ARCH_BOARD_PX4IO_V1
 #define r_setup_relays		r_page_setup[PX4IO_P_SETUP_RELAYS]
 #endif
+#define r_setup_rc_thr_failsafe	r_page_setup[PX4IO_P_SETUP_RC_THR_FAILSAFE_US]
 
 #define r_control_values	(&r_page_controls[0])
 
@@ -111,7 +119,8 @@ extern uint16_t			r_page_servo_idle[];	/* PX4IO_PAGE_IDLE_PWM */
  */
 struct sys_state_s {
 
-	volatile uint64_t	rc_channels_timestamp;
+	volatile uint64_t	rc_channels_timestamp_received;
+	volatile uint64_t	rc_channels_timestamp_valid;
 
 	/**
 	 * Last FMU receive time, in microseconds since system boot
@@ -123,11 +132,17 @@ struct sys_state_s {
 extern struct sys_state_s system_state;
 
 /*
+ * PWM limit structure
+ */
+extern pwm_limit_t pwm_limit;
+
+/*
  * GPIO handling.
  */
 #define LED_BLUE(_s)			stm32_gpiowrite(GPIO_LED1, !(_s))
 #define LED_AMBER(_s)			stm32_gpiowrite(GPIO_LED2, !(_s))
 #define LED_SAFETY(_s)			stm32_gpiowrite(GPIO_LED3, !(_s))
+#define LED_RING(_s)			stm32_gpiowrite(GPIO_LED4, (_s))
 
 #ifdef CONFIG_ARCH_BOARD_PX4IO_V1
 
@@ -151,6 +166,7 @@ extern struct sys_state_s system_state;
 
 # define PX4IO_RELAY_CHANNELS		0
 # define POWER_SPEKTRUM(_s)		stm32_gpiowrite(GPIO_SPEKTRUM_PWR_EN, (_s))
+# define ENABLE_SBUS_OUT(_s)		stm32_gpiowrite(GPIO_SBUS_OENABLE, !(_s))
 
 # define VDD_SERVO_FAULT		(!stm32_gpioread(GPIO_SERVO_FAULT_DETECT))
 
@@ -162,16 +178,19 @@ extern struct sys_state_s system_state;
 
 #define BUTTON_SAFETY		stm32_gpioread(GPIO_BTN_SAFETY)
 
+#define CONTROL_PAGE_INDEX(_group, _channel) (_group * PX4IO_CONTROL_CHANNELS + _channel)
+
 /*
  * Mixer
  */
 extern void	mixer_tick(void);
-extern void	mixer_handle_text(const void *buffer, size_t length);
+extern int	mixer_handle_text(const void *buffer, size_t length);
 
 /**
  * Safety switch/LED.
  */
 extern void	safety_init(void);
+extern void	failsafe_led_init(void);
 
 /**
  * FMU communications
@@ -199,13 +218,20 @@ extern uint16_t	adc_measure(unsigned channel);
 extern void	controls_init(void);
 extern void	controls_tick(void);
 extern int	dsm_init(const char *device);
-extern bool	dsm_input(uint16_t *values, uint16_t *num_values);
+extern bool	dsm_input(uint16_t *values, uint16_t *num_values, uint8_t *n_bytes, uint8_t **bytes);
 extern void	dsm_bind(uint16_t cmd, int pulses);
 extern int	sbus_init(const char *device);
-extern bool	sbus_input(uint16_t *values, uint16_t *num_values, uint16_t max_channels);
+extern bool	sbus_input(uint16_t *values, uint16_t *num_values, bool *sbus_failsafe, bool *sbus_frame_drop,
+			   uint16_t max_channels);
+extern void	sbus1_output(uint16_t *values, uint16_t num_values);
+extern void	sbus2_output(uint16_t *values, uint16_t num_values);
 
 /** global debug level for isr_debug() */
 extern volatile uint8_t debug_level;
 
 /** send a debug message to the console */
 extern void	isr_debug(uint8_t level, const char *fmt, ...);
+
+/** schedule a reboot */
+extern void schedule_reboot(uint32_t time_delta_usec);
+

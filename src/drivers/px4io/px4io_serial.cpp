@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2013 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2013-2015 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,6 +48,7 @@
 #include <time.h>
 #include <errno.h>
 #include <string.h>
+#include <stdio.h>
 
 #include <arch/board/board.h>
 
@@ -156,6 +157,10 @@ private:
 	perf_counter_t		_pc_idle;
 	perf_counter_t		_pc_badidle;
 
+	/* do not allow top copying this class */
+	PX4IO_serial(PX4IO_serial &);
+	PX4IO_serial& operator = (const PX4IO_serial &);
+
 };
 
 IOPacket PX4IO_serial::_dma_buffer;
@@ -172,7 +177,9 @@ PX4IO_serial::PX4IO_serial() :
 	_tx_dma(nullptr),
 	_rx_dma(nullptr),
 	_rx_dma_status(_dma_status_inactive),
-	_pc_txns(perf_alloc(PC_ELAPSED,		"io_txns     ")),
+	_bus_semaphore(SEM_INITIALIZER(0)),
+	_completion_semaphore(SEM_INITIALIZER(0)),
+	_pc_txns(perf_alloc(PC_ELAPSED, "io_txns     ")),
 	_pc_dmasetup(perf_alloc(PC_ELAPSED,	"io_dmasetup ")),
 	_pc_retries(perf_alloc(PC_COUNT,	"io_retries  ")),
 	_pc_timeouts(perf_alloc(PC_COUNT,	"io_timeouts ")),
@@ -232,11 +239,13 @@ PX4IO_serial::~PX4IO_serial()
 int
 PX4IO_serial::init()
 {
+
 	/* allocate DMA */
 	_tx_dma = stm32_dmachannel(PX4IO_SERIAL_TX_DMAMAP);
 	_rx_dma = stm32_dmachannel(PX4IO_SERIAL_RX_DMAMAP);
-	if ((_tx_dma == nullptr) || (_rx_dma == nullptr))
+	if ((_tx_dma == nullptr) || (_rx_dma == nullptr)) {
 		return -1;
+	}
 
 	/* configure pins for serial use */
 	stm32_configgpio(PX4IO_SERIAL_TX_GPIO);
@@ -251,6 +260,7 @@ PX4IO_serial::init()
 	(void)rSR;
 	(void)rDR;
 
+
 	/* configure line speed */
 	uint32_t usartdiv32 = PX4IO_SERIAL_CLOCK / (PX4IO_SERIAL_BITRATE / 2);
 	uint32_t mantissa = usartdiv32 >> 5;
@@ -262,7 +272,8 @@ PX4IO_serial::init()
 	up_enable_irq(PX4IO_SERIAL_VECTOR);
 
 	/* enable UART in DMA mode, enable error and line idle interrupts */
-	/* rCR3 = USART_CR3_EIE;*/
+	rCR3 = USART_CR3_EIE;
+
 	rCR1 = USART_CR1_RE | USART_CR1_TE | USART_CR1_UE | USART_CR1_IDLEIE;
 
 	/* create semaphores */
@@ -497,22 +508,20 @@ PX4IO_serial::_wait_complete()
 		DMA_SCR_PBURST_SINGLE	|
 		DMA_SCR_MBURST_SINGLE);
 	stm32_dmastart(_tx_dma, nullptr, nullptr, false);
+	//rCR1 &= ~USART_CR1_TE;
+	//rCR1 |= USART_CR1_TE;
 	rCR3 |= USART_CR3_DMAT;
 
 	perf_end(_pc_dmasetup);
 
-	/* compute the deadline for a 5ms timeout */
+	/* compute the deadline for a 10ms timeout */
 	struct timespec abstime;
 	clock_gettime(CLOCK_REALTIME, &abstime);
-#if 0
-	abstime.tv_sec++;		/* long timeout for testing */
-#else
-	abstime.tv_nsec += 10000000;	/* 0ms timeout */
-	if (abstime.tv_nsec > 1000000000) {
+	abstime.tv_nsec += 10*1000*1000;
+	if (abstime.tv_nsec >= 1000*1000*1000) {
 		abstime.tv_sec++;
-		abstime.tv_nsec -= 1000000000;
+		abstime.tv_nsec -= 1000*1000*1000;
 	}
-#endif
 
 	/* wait for the transaction to complete - 64 bytes @ 1.5Mbps ~426µs */
 	int ret;
@@ -619,8 +628,8 @@ PX4IO_serial::_do_interrupt()
 		 */
 		if (_rx_dma_status == _dma_status_waiting) {
 			_abort_dma();
-			perf_count(_pc_uerrs);
 
+			perf_count(_pc_uerrs);
 			/* complete DMA as though in error */
 			_do_rx_dma_callback(DMA_STATUS_TEIF);
 
@@ -639,9 +648,15 @@ PX4IO_serial::_do_interrupt()
 		if (_rx_dma_status == _dma_status_waiting) {
 
 			/* verify that the received packet is complete */
-			unsigned length = sizeof(_dma_buffer) - stm32_dmaresidual(_rx_dma);
+			size_t length = sizeof(_dma_buffer) - stm32_dmaresidual(_rx_dma);
 			if ((length < 1) || (length < PKT_SIZE(_dma_buffer))) {
 				perf_count(_pc_badidle);
+
+				/* stop the receive DMA */
+				stm32_dmastop(_rx_dma);
+
+				/* complete the short reception */
+				_do_rx_dma_callback(DMA_STATUS_TEIF);
 				return;
 			}
 

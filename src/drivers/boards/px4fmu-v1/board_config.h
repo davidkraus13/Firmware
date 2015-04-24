@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2012-2014 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,7 +34,7 @@
 /**
  * @file board_config.h
  *
- * PX4FMU internal definitions
+ * PX4FMUv1 internal definitions
  */
 
 #pragma once
@@ -52,7 +52,7 @@ __BEGIN_DECLS
 /* these headers are not C++ safe */
 #include <stm32.h>
 #include <arch/board/board.h>
- 
+
 /****************************************************************************************************
  * Definitions
  ****************************************************************************************************/
@@ -60,6 +60,7 @@ __BEGIN_DECLS
 
 /* PX4IO connection configuration */
 #define PX4IO_SERIAL_DEVICE	"/dev/ttyS2"
+#define UDID_START		0x1FFF7A10
 
 //#ifdef CONFIG_STM32_SPI2
 //#  error "SPI2 is not supported on this board"
@@ -84,6 +85,8 @@ __BEGIN_DECLS
 #define GPIO_SPI_CS_MPU		(GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|GPIO_OUTPUT_SET|GPIO_PORTB|GPIO_PIN0)
 #define GPIO_SPI_CS_SDCARD	(GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|GPIO_OUTPUT_SET|GPIO_PORTA|GPIO_PIN4)
 
+#define PX4_SPI_BUS_SENSORS	1
+
 /*
  * Use these in place of the spi_dev_e enumeration to
  * select a specific SPI device on SPI1
@@ -95,7 +98,7 @@ __BEGIN_DECLS
 /*
  * Optional devices on IO's external port
  */
-#define PX4_SPIDEV_ACCEL_MAG 2
+#define PX4_SPIDEV_ACCEL_MAG	2
 
 /*
  * I2C busses
@@ -111,7 +114,6 @@ __BEGIN_DECLS
  * Note that these are unshifted addresses.
  */
 #define PX4_I2C_OBDEV_HMC5883	0x1e
-#define PX4_I2C_OBDEV_MS5611	0x76
 #define PX4_I2C_OBDEV_EEPROM	NOTDEFINED
 #define PX4_I2C_OBDEV_LED	0x55
 
@@ -180,7 +182,7 @@ __BEGIN_DECLS
 #define HRT_TIMER		1	/* use timer1 for the HRT */
 #define HRT_TIMER_CHANNEL	1	/* use capture/compare channel */
 #define HRT_PPM_CHANNEL		3	/* use capture/compare channel 3 */
-#define GPIO_PPM_IN		(GPIO_ALT|GPIO_AF1|GPIO_SPEED_50MHz|GPIO_PULLUP|GPIO_PORTA|GPIO_PIN10)
+#define GPIO_PPM_IN		(GPIO_ALT|GPIO_AF1|GPIO_PULLUP|GPIO_PORTA|GPIO_PIN10)
 
 /****************************************************************************************************
  * Public Types
@@ -205,6 +207,27 @@ __BEGIN_DECLS
  ****************************************************************************************************/
 
 extern void stm32_spiinitialize(void);
+
+extern void stm32_usbinitialize(void);
+
+/****************************************************************************
+ * Name: nsh_archinitialize
+ *
+ * Description:
+ *   Perform architecture specific initialization for NSH.
+ *
+ *   CONFIG_NSH_ARCHINIT=y :
+ *     Called from the NSH library
+ *
+ *   CONFIG_BOARD_INITIALIZE=y, CONFIG_NSH_LIBRARY=y, &&
+ *   CONFIG_NSH_ARCHINIT=n :
+ *     Called from board_initialize().
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NSH_LIBRARY
+int nsh_archinitialize(void);
+#endif
 
 #endif /* __ASSEMBLY__ */
 
