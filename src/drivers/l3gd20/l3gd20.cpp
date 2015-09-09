@@ -39,7 +39,7 @@
  *       also supported by this driver.
  */
 
-#include <nuttx/config.h>
+#include <px4_config.h>
 
 #include <sys/types.h>
 #include <stdint.h>
@@ -179,6 +179,8 @@ static const int ERROR = -1;
 #define L3GD20_DEFAULT_FILTER_FREQ		30
 #define L3GD20_TEMP_OFFSET_CELSIUS		40
 
+#define L3GD20_MAX_OFFSET			0.45f /**< max offset: 25 degrees/s */
+
 #ifdef PX4_SPI_BUS_EXT
 #define EXTERNAL_BUS PX4_SPI_BUS_EXT
 #else
@@ -195,7 +197,7 @@ static const int ERROR = -1;
   This time reduction is enough to cope with worst case timing jitter
   due to other timers
  */
-#define L3GD20_TIMER_REDUCTION				200
+#define L3GD20_TIMER_REDUCTION				600
 
 extern "C" { __EXPORT int l3gd20_main(int argc, char *argv[]); }
 
@@ -229,7 +231,7 @@ private:
 	struct hrt_call		_call;
 	unsigned		_call_interval;
 
-	RingBuffer		*_reports;
+	ringbuffer::RingBuffer	*_reports;
 
 	struct gyro_scale	_gyro_scale;
 	float			_gyro_range_scale;
@@ -411,7 +413,7 @@ L3GD20::L3GD20(int bus, const char* path, spi_dev_e device, enum Rotation rotati
 	_gyro_scale{},
 	_gyro_range_scale(0.0f),
 	_gyro_range_rad_s(0.0f),
-	_gyro_topic(-1),
+	_gyro_topic(nullptr),
 	_orb_class_instance(-1),
 	_class_instance(-1),
 	_current_rate(0),
@@ -472,7 +474,7 @@ L3GD20::init()
 		goto out;
 
 	/* allocate basic report buffers */
-	_reports = new RingBuffer(2, sizeof(gyro_report));
+	_reports = new ringbuffer::RingBuffer(2, sizeof(gyro_report));
 
 	if (_reports == nullptr)
 		goto out;
@@ -490,8 +492,8 @@ L3GD20::init()
 	_gyro_topic = orb_advertise_multi(ORB_ID(sensor_gyro), &grp,
 		&_orb_class_instance, (is_external()) ? ORB_PRIO_VERY_HIGH : ORB_PRIO_DEFAULT);
 
-	if (_gyro_topic < 0) {
-		debug("failed to create sensor_gyro publication");
+	if (_gyro_topic == nullptr) {
+		DEVICE_DEBUG("failed to create sensor_gyro publication");
 	}
 
 	ret = OK;
@@ -873,7 +875,7 @@ L3GD20::disable_i2c(void)
 			return;
 		}
 	}
-	debug("FAILED TO DISABLE I2C");
+	DEVICE_DEBUG("FAILED TO DISABLE I2C");
 }
 
 void
@@ -1102,18 +1104,18 @@ L3GD20::test_error()
 int
 L3GD20::self_test()
 {
-	/* evaluate gyro offsets, complain if offset -> zero or larger than 6 dps */
-	if (fabsf(_gyro_scale.x_offset) > 0.1f || fabsf(_gyro_scale.x_offset) < 0.000001f)
+	/* evaluate gyro offsets, complain if offset -> zero or larger than 25 dps */
+	if (fabsf(_gyro_scale.x_offset) > L3GD20_MAX_OFFSET || fabsf(_gyro_scale.x_offset) < 0.000001f)
 		return 1;
 	if (fabsf(_gyro_scale.x_scale - 1.0f) > 0.3f)
 		return 1;
 
-	if (fabsf(_gyro_scale.y_offset) > 0.1f || fabsf(_gyro_scale.y_offset) < 0.000001f)
+	if (fabsf(_gyro_scale.y_offset) > L3GD20_MAX_OFFSET || fabsf(_gyro_scale.y_offset) < 0.000001f)
 		return 1;
 	if (fabsf(_gyro_scale.y_scale - 1.0f) > 0.3f)
 		return 1;
 
-	if (fabsf(_gyro_scale.z_offset) > 0.1f || fabsf(_gyro_scale.z_offset) < 0.000001f)
+	if (fabsf(_gyro_scale.z_offset) > L3GD20_MAX_OFFSET || fabsf(_gyro_scale.z_offset) < 0.000001f)
 		return 1;
 	if (fabsf(_gyro_scale.z_scale - 1.0f) > 0.3f)
 		return 1;

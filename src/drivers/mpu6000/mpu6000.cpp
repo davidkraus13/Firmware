@@ -40,7 +40,7 @@
  * @author Pat Hickey
  */
 
-#include <nuttx/config.h>
+#include <px4_config.h>
 
 #include <sys/types.h>
 #include <stdint.h>
@@ -147,6 +147,8 @@
 #define BIT_I2C_IF_DIS			0x10
 #define BIT_INT_STATUS_DATA		0x01
 
+#define MPU_WHOAMI_6000			0x68
+
 // Product ID Description for MPU6000
 // high 4 bits 	low 4 bits
 // Product Name	Product Revision
@@ -242,7 +244,7 @@ private:
 	struct hrt_call		_call;
 	unsigned		_call_interval;
 
-	RingBuffer		*_accel_reports;
+	ringbuffer::RingBuffer	*_accel_reports;
 
 	struct accel_scale	_accel_scale;
 	float			_accel_range_scale;
@@ -251,7 +253,7 @@ private:
 	int			_accel_orb_class_instance;
 	int			_accel_class_instance;
 
-	RingBuffer		*_gyro_reports;
+	ringbuffer::RingBuffer	*_gyro_reports;
 
 	struct gyro_scale	_gyro_scale;
 	float			_gyro_range_scale;
@@ -507,7 +509,7 @@ MPU6000::MPU6000(int bus, const char *path_accel, const char *path_gyro, spi_dev
 	_accel_scale{},
 	_accel_range_scale(0.0f),
 	_accel_range_m_s2(0.0f),
-	_accel_topic(-1),
+	_accel_topic(nullptr),
 	_accel_orb_class_instance(-1),
 	_accel_class_instance(-1),
 	_gyro_reports(nullptr),
@@ -606,16 +608,16 @@ MPU6000::init()
 
 	/* if probe/setup failed, bail now */
 	if (ret != OK) {
-		debug("SPI setup failed");
+		DEVICE_DEBUG("SPI setup failed");
 		return ret;
 	}
 
 	/* allocate basic report buffers */
-	_accel_reports = new RingBuffer(2, sizeof(accel_report));
+	_accel_reports = new ringbuffer::RingBuffer(2, sizeof(accel_report));
 	if (_accel_reports == nullptr)
 		goto out;
 
-	_gyro_reports = new RingBuffer(2, sizeof(gyro_report));
+	_gyro_reports = new ringbuffer::RingBuffer(2, sizeof(gyro_report));
 	if (_gyro_reports == nullptr)
 		goto out;
 
@@ -642,7 +644,7 @@ MPU6000::init()
 	ret = _gyro->init();
 	/* if probe/setup failed, bail now */
 	if (ret != OK) {
-		debug("gyro init failed");
+		DEVICE_DEBUG("gyro init failed");
 		return ret;
 	}
 
@@ -658,7 +660,7 @@ MPU6000::init()
 	_accel_topic = orb_advertise_multi(ORB_ID(sensor_accel), &arp,
 		&_accel_orb_class_instance, (is_external()) ? ORB_PRIO_MAX : ORB_PRIO_HIGH);
 
-	if (_accel_topic < 0) {
+	if (_accel_topic == nullptr) {
 		warnx("ADVERT FAIL");
 	}
 
@@ -670,7 +672,7 @@ MPU6000::init()
 	_gyro->_gyro_topic = orb_advertise_multi(ORB_ID(sensor_gyro), &grp,
 		&_gyro->_gyro_orb_class_instance, (is_external()) ? ORB_PRIO_MAX : ORB_PRIO_HIGH);
 
-	if (_gyro->_gyro_topic < 0) {
+	if (_gyro->_gyro_topic == nullptr) {
 		warnx("ADVERT FAIL");
 	}
 
@@ -755,6 +757,13 @@ int MPU6000::reset()
 int
 MPU6000::probe()
 {
+	uint8_t whoami;
+	whoami = read_reg(MPUREG_WHOAMI);
+	if (whoami != MPU_WHOAMI_6000) {
+		DEVICE_DEBUG("unexpected WHOAMI 0x%02x", whoami);
+		return -EIO;
+
+	}
 
 	/* look for a product ID we recognise */
 	_product = read_reg(MPUREG_PRODUCT_ID);
@@ -773,12 +782,12 @@ MPU6000::probe()
 	case MPU6000_REV_D8:
 	case MPU6000_REV_D9:
 	case MPU6000_REV_D10:
-		debug("ID 0x%02x", _product);
+		DEVICE_DEBUG("ID 0x%02x", _product);
 		_checked_values[0] = _product;
 		return OK;
 	}
 
-	debug("unexpected ID 0x%02x", _product);
+	DEVICE_DEBUG("unexpected ID 0x%02x", _product);
 	return -EIO;
 }
 
@@ -913,10 +922,14 @@ MPU6000::gyro_self_test()
 
 	/*
 	 * Maximum deviation of 20 degrees, according to
-	 * http://www.invensense.com/mems/gyro/documents/PS-MPU-6000A-00v3.4.pdf
+	 * http://www.farnell.com/datasheets/1788002.pdf
 	 * Section 6.1, initial ZRO tolerance
+	 *
+	 * 20 dps (0.34 rad/s) initial offset
+	 * and 20 dps temperature drift, so 0.34 rad/s * 2
 	 */
-	const float max_offset = 0.34f;
+	const float max_offset = 2.0f * 0.34f;
+
 	/* 30% scale error is chosen to catch completely faulty units but
 	 * to let some slight scale error pass. Requires a rate table or correlation
 	 * with mag rotations + data fit to
@@ -1847,7 +1860,7 @@ MPU6000::print_registers()
 MPU6000_gyro::MPU6000_gyro(MPU6000 *parent, const char *path) :
 	CDev("MPU6000_gyro", path),
 	_parent(parent),
-	_gyro_topic(-1),
+	_gyro_topic(nullptr),
 	_gyro_orb_class_instance(-1),
 	_gyro_class_instance(-1)
 {
@@ -1869,7 +1882,7 @@ MPU6000_gyro::init()
 
 	/* if probe/setup failed, bail now */
 	if (ret != OK) {
-		debug("gyro init failed");
+		DEVICE_DEBUG("gyro init failed");
 		return ret;
 	}
 

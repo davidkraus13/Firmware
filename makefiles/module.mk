@@ -113,7 +113,9 @@
 ifeq ($(MODULE_MK),)
 $(error No module makefile specified)
 endif
+ifeq ($(V),1)
 $(info %% MODULE_MK           = $(MODULE_MK))
+endif
 
 #
 # Get the board/toolchain config
@@ -125,10 +127,12 @@ include $(BOARD_FILE)
 #
 include $(MODULE_MK)
 MODULE_SRC		:= $(dir $(MODULE_MK))
+ifeq ($(V),1)
 $(info %  MODULE_NAME         = $(MODULE_NAME))
 $(info %  MODULE_SRC          = $(MODULE_SRC))
 $(info %  MODULE_OBJ          = $(MODULE_OBJ))
 $(info %  MODULE_WORK_DIR     = $(MODULE_WORK_DIR))
+endif
 
 #
 # Things that, if they change, might affect everything
@@ -144,6 +148,7 @@ MODULE_ENTRYPOINT	?= $(MODULE_COMMAND)_main
 MODULE_STACKSIZE	?= CONFIG_PTHREAD_STACK_DEFAULT
 MODULE_PRIORITY		?= SCHED_PRIORITY_DEFAULT
 MODULE_COMMANDS		+= $(MODULE_COMMAND).$(MODULE_PRIORITY).$(MODULE_STACKSIZE).$(MODULE_ENTRYPOINT)
+CXXFLAGS		+= -DPX4_MAIN=$(MODULE_COMMAND)_app_main
 endif
 
 ifneq ($(MODULE_COMMANDS),)
